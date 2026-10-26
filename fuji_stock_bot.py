@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 PRODUCT_URL = "https://myfuji.com.tw/product/fujifilm-x-m5xc15-45mm-kit/"
+API_BASE = "https://myfuji.com.tw/wp-json/wc/store/v1"
 CHECK_INTERVAL_SEC = 300
 BASE_DIR = Path(__file__).resolve().parent
 STATE_FILE = BASE_DIR / "stock_state.json"
@@ -77,6 +78,43 @@ def parse_stock(page):
     raise RuntimeError("無法解析庫存狀態，網頁結構可能已改變")
 
 
+def stock_from_api():
+    """透過 WooCommerce Store API 取得 {變體名稱: 是否有貨}。"""
+    slug = PRODUCT_URL.rstrip("/").rsplit("/", 1)[-1]
+    products = json.loads(fetch_page(f"{API_BASE}/products?slug={slug}"))
+    if not products:
+        raise RuntimeError(f"API 找不到商品 {slug}")
+    product = products[0]
+    if not product.get("variations"):
+        return {"商品": bool(product.get("is_in_stock"))}
+    result = {}
+    for v in product["variations"]:
+        name = " / ".join(a["value"] for a in v.get("attributes", [])) or str(v["id"])
+        detail = json.loads(fetch_page(f"{API_BASE}/products/{v['id']}"))
+        result[name] = bool(detail.get("is_in_stock")) and bool(detail.get("is_purchasable", True))
+    return result
+
+
+def describe(text):
+    """失敗時印出網站實際回傳的內容摘要，方便判斷是否被擋。"""
+    title = re.search(r"<title[^>]*>(.*?)</title>", text, re.S | re.I)
+    snippet = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text))[:300]
+    return f"長度={len(text)} 標題={title.group(1).strip() if title else '無'} 內容={snippet}"
+
+
+def get_stock():
+    try:
+        return stock_from_api()
+    except Exception as e:
+        log(f"API 讀取失敗：{e}，改用商品頁")
+    page = fetch_page(PRODUCT_URL)
+    try:
+        return parse_stock(page)
+    except RuntimeError:
+        log("商品頁回傳內容：" + describe(page))
+        raise
+
+
 def push_line(token, to, text):
     body = json.dumps({"to": to, "messages": [{"type": "text", "text": text}]}).encode("utf-8")
     req = urllib.request.Request(
@@ -98,7 +136,7 @@ def load_state():
 
 
 def check_once(token, to):
-    stock = parse_stock(fetch_page(PRODUCT_URL))
+    stock = get_stock()
     log("庫存：" + "，".join(f"{k}={'有貨' if v else '缺貨'}" for k, v in stock.items()))
 
     prev = load_state()
