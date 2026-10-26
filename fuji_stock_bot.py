@@ -1,6 +1,6 @@
 """
 富士相機到貨追蹤機器人
-監控 myfuji.com.tw 商品頁，任一顏色有貨時推播到 LINE 聊天室（LINE Messaging API）。
+監控 myfuji.com.tw 商品，任一商品／顏色有貨時推播到 LINE 聊天室（LINE Messaging API）。
 
 用法：
     python fuji_stock_bot.py            # 持續監控（預設每 5 分鐘）
@@ -22,7 +22,11 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-PRODUCT_URL = "https://myfuji.com.tw/product/fujifilm-x-m5xc15-45mm-kit/"
+# 要追蹤的商品頁網址，想加新商品就在這裡多加一行
+PRODUCT_URLS = [
+    "https://myfuji.com.tw/product/fujifilm-x-m5xc15-45mm-kit/",
+    "https://myfuji.com.tw/product/fujifilm-x-t30iiixc13-33mm-kit/",
+]
 API_BASE = "https://myfuji.com.tw/wp-json/wc/store/v1"
 CHECK_INTERVAL_SEC = 300
 BASE_DIR = Path(__file__).resolve().parent
@@ -78,21 +82,26 @@ def parse_stock(page):
     raise RuntimeError("無法解析庫存狀態，網頁結構可能已改變")
 
 
-def stock_from_api():
-    """透過 WooCommerce Store API 取得 {變體名稱: 是否有貨}。"""
-    slug = PRODUCT_URL.rstrip("/").rsplit("/", 1)[-1]
+def slug_of(url):
+    return url.rstrip("/").rsplit("/", 1)[-1]
+
+
+def stock_from_api(url):
+    """透過 WooCommerce Store API 取得 (商品名稱, {變體名稱: 是否有貨})。"""
+    slug = slug_of(url)
     products = json.loads(fetch_page(f"{API_BASE}/products?slug={slug}"))
     if not products:
         raise RuntimeError(f"API 找不到商品 {slug}")
     product = products[0]
+    name = html.unescape(product.get("name") or slug)
     if not product.get("variations"):
-        return {"商品": bool(product.get("is_in_stock"))}
+        return name, {"商品": bool(product.get("is_in_stock"))}
     result = {}
     for v in product["variations"]:
-        name = " / ".join(a["value"] for a in v.get("attributes", [])) or str(v["id"])
+        vname = " / ".join(a["value"] for a in v.get("attributes", [])) or str(v["id"])
         detail = json.loads(fetch_page(f"{API_BASE}/products/{v['id']}"))
-        result[name] = bool(detail.get("is_in_stock")) and bool(detail.get("is_purchasable", True))
-    return result
+        result[vname] = bool(detail.get("is_in_stock")) and bool(detail.get("is_purchasable", True))
+    return name, result
 
 
 def describe(text):
@@ -102,14 +111,14 @@ def describe(text):
     return f"長度={len(text)} 標題={title.group(1).strip() if title else '無'} 內容={snippet}"
 
 
-def get_stock():
+def get_stock(url):
     try:
-        return stock_from_api()
+        return stock_from_api(url)
     except Exception as e:
         log(f"API 讀取失敗：{e}，改用商品頁")
-    page = fetch_page(PRODUCT_URL)
+    page = fetch_page(url)
     try:
-        return parse_stock(page)
+        return slug_of(url), parse_stock(page)
     except RuntimeError:
         log("商品頁回傳內容：" + describe(page))
         raise
@@ -136,21 +145,30 @@ def load_state():
 
 
 def check_once(token, to):
-    stock = get_stock()
-    log("庫存：" + "，".join(f"{k}={'有貨' if v else '缺貨'}" for k, v in stock.items()))
-
     prev = load_state()
-    # 只在「缺貨 → 有貨」時通知，避免重複洗版
-    newly = [k for k, v in stock.items() if v and not prev.get(k, False)]
-    if newly:
-        text = (
-            "📷 富士 X-M5 + XC15-45mm Kit 到貨啦！\n"
-            f"有貨顏色：{'、'.join(newly)}\n"
-            f"{PRODUCT_URL}"
-        )
-        push_line(token, to, text)
-        log(f"已通知 LINE：{newly}")
-    STATE_FILE.write_text(json.dumps(stock, ensure_ascii=False), encoding="utf-8")
+    state = {}
+    errors = []
+    for url in PRODUCT_URLS:
+        old = prev.get(url) if isinstance(prev.get(url), dict) else {}
+        try:
+            name, stock = get_stock(url)
+        except Exception as e:
+            log(f"{slug_of(url)} 檢查失敗：{e}")
+            errors.append(url)
+            state[url] = old  # 保留上次狀態
+            continue
+        log(f"{name}：" + "，".join(f"{k}={'有貨' if v else '缺貨'}" for k, v in stock.items()))
+
+        # 只在「缺貨 → 有貨」時通知，避免重複洗版
+        newly = [k for k, v in stock.items() if v and not old.get(k, False)]
+        if newly:
+            push_line(token, to, f"📷 {name} 到貨啦！\n有貨顏色：{'、'.join(newly)}\n{url}")
+            log(f"已通知 LINE：{name} {newly}")
+        state[url] = stock
+
+    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+    if errors:
+        raise RuntimeError(f"{len(errors)} 個商品檢查失敗")
 
 
 def main():
