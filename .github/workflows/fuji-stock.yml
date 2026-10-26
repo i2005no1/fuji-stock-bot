@@ -1,0 +1,40 @@
+name: 富士到貨檢查
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # 每 5 分鐘（UTC，GitHub 尖峰時段可能延遲）
+  workflow_dispatch:         # 可在 Actions 頁面手動執行
+
+permissions:
+  contents: write            # 需要把 stock_state.json 存回 repo
+
+concurrency:
+  group: fuji-stock
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 檢查庫存
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TO: ${{ secrets.LINE_TO }}
+        run: python fuji_stock_bot.py --once
+
+      - name: 儲存庫存狀態
+        run: |
+          if [ -n "$(git status --porcelain stock_state.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add stock_state.json
+            git commit -m "更新庫存狀態"
+            git push
+          fi
