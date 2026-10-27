@@ -9,7 +9,7 @@
 
 需要的環境變數（或寫在同資料夾的 config.json）：
     LINE_CHANNEL_ACCESS_TOKEN   Messaging API channel 的長期 access token
-    LINE_TO                     要推播的 userId / groupId / roomId
+    LINE_TO                     all = 廣播給所有好友；或 userId / groupId（多個用逗號分隔）
 """
 import argparse
 import html
@@ -125,9 +125,18 @@ def get_stock(url):
 
 
 def push_line(token, to, text):
-    body = json.dumps({"to": to, "messages": [{"type": "text", "text": text}]}).encode("utf-8")
+    """LINE_TO 設為 all 時廣播給所有好友；多個 ID 用逗號分隔；否則推播給單一對象。"""
+    messages = [{"type": "text", "text": text}]
+    ids = [x.strip() for x in to.split(",") if x.strip()]
+    if to.strip().lower() == "all":
+        endpoint, payload = "broadcast", {"messages": messages}
+    elif len(ids) > 1:
+        endpoint, payload = "multicast", {"to": ids, "messages": messages}
+    else:
+        endpoint, payload = "push", {"to": to.strip(), "messages": messages}
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        "https://api.line.me/v2/bot/message/push",
+        f"https://api.line.me/v2/bot/message/{endpoint}",
         data=body,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         method="POST",
