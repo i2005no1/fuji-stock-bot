@@ -185,18 +185,14 @@ function stockQty(p) {
   return max > 0 && max < 9999 ? max : null;
 }
 
-// 單一規格商品一行顯示；多顏色商品先列名稱，顏色排在下一行
+// 商品名稱一行，下面每個顏色（單一規格商品則只有一行）標示有貨／缺貨
 function formatProduct({ name, stock, url, qty = {}, stale }) {
-  const count = (k, v) => (v && qty[k] ? `（剩 ${qty[k]} 台）` : "");
-  const entries = Object.entries(stock);
-  const warn = stale ? " ⚠️" : "";
-  const link = entries.some(([, v]) => v) ? `\n　👉 ${url}` : "";
-  if (entries.length === 1 && entries[0][0] === "商品") {
-    const [k, v] = entries[0];
-    return `${v ? "✅" : "❌"} ${shortName(name)}${count(k, v)}${warn}${link}`;
-  }
-  const colors = entries.map(([k, v]) => `${k}${v ? "✅" : "❌"}${count(k, v)}`).join("　");
-  return `・${shortName(name)}${warn}\n　${colors}${link}`;
+  const lines = Object.entries(stock).map(([k, v]) => {
+    const status = `${v ? "✅ 有貨" : "❌ 缺貨"}${v && qty[k] ? `（剩 ${qty[k]} 台）` : ""}`;
+    return `　${k === "商品" ? status : `${k}：${status}`}`;
+  });
+  const link = Object.values(stock).some(Boolean) ? `\n　👉 ${url}` : "";
+  return `・${shortName(name)}${stale ? " ⚠️" : ""}\n${lines.join("\n")}${link}`;
 }
 
 async function getJson(url) {
