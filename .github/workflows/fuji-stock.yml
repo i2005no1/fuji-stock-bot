@@ -1,9 +1,7 @@
 name: 富士到貨檢查
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"   # 每 5 分鐘（UTC，GitHub 尖峰時段可能延遲）
-  workflow_dispatch:         # 可在 Actions 頁面手動執行
+  workflow_dispatch:         # 由 cron-job.org 定時呼叫 API 觸發，也可在 Actions 頁面手動執行
     inputs:
       test:
         description: "只發一則測試訊息到 LINE（不檢查庫存）"
