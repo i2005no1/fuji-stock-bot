@@ -43,7 +43,8 @@ jobs:
         run: python fuji_stock_bot.py --once
 
       - name: 儲存庫存狀態
-        if: ${{ !inputs.test }}
+        # 某個網站暫時失敗時也要存，否則其他商品下次會重複通知
+        if: ${{ !cancelled() && !inputs.test }}
         run: |
           if [ -n "$(git status --porcelain stock_state.json)" ]; then
             git config user.name "github-actions[bot]"

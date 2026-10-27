@@ -1,6 +1,6 @@
 """
 富士相機到貨追蹤機器人
-監控 myfuji.com.tw 商品，任一商品／顏色有貨時推播到 LINE 聊天室（LINE Messaging API）。
+監控 myfuji.com.tw、PChome、momo 商品，任一商品／顏色有貨時推播到 LINE 聊天室（LINE Messaging API）。
 
 用法：
     python fuji_stock_bot.py            # 持續監控（預設每 5 分鐘）
@@ -21,13 +21,21 @@ import time
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
-# 要追蹤的商品頁網址，想加新商品就在這裡多加一行
+# 要追蹤的商品頁網址，想加新商品就在這裡多加一行（支援 myfuji、PChome 24h、momo）
 PRODUCT_URLS = [
     "https://myfuji.com.tw/product/fujifilm-x-m5xc15-45mm-kit/",
     "https://myfuji.com.tw/product/fujifilm-x-t30iiixc13-33mm-kit/",
+    # RICOH GR IIIx 公司貨
+    "https://24h.pchome.com.tw/prod/DGADJN-1900JXSR9",   # 標準版
+    "https://24h.pchome.com.tw/prod/DGADJN-1900K6GUY",   # 標準版 + GF-2 閃光燈組
+    "https://24h.pchome.com.tw/prod/DGADLR-1900KHK6N",   # HDF 全配組
+    "https://www.momoshop.com.tw/goods/GoodsDetail.jsp?i_code=13432322",  # +Q20III 閃光燈組
+    "https://www.momoshop.com.tw/goods/GoodsDetail.jsp?i_code=12985987",  # HDF +Q20III 閃光燈組
 ]
 API_BASE = "https://myfuji.com.tw/wp-json/wc/store/v1"
+PCHOME_API = "https://ecapi-cdn.pchome.com.tw/ecshop/prodapi/v2/prod"
 CHECK_INTERVAL_SEC = 300
 BASE_DIR = Path(__file__).resolve().parent
 STATE_FILE = BASE_DIR / "stock_state.json"
@@ -111,7 +119,39 @@ def describe(text):
     return f"長度={len(text)} 標題={title.group(1).strip() if title else '無'} 內容={snippet}"
 
 
+def stock_from_pchome(url):
+    """PChome 24h：ButtonType 為 ForSale 才是可下單，OrderRefill 是補貨中。"""
+    pid = slug_of(url)
+    button = json.loads(fetch_page(f"{PCHOME_API}/button&id={pid}&fields=Id,Qty,ButtonType"))[0]
+    name = f"PChome {pid}"
+    try:
+        # 商品名稱 API 只有 JSONP 格式穩定有回應
+        text = fetch_page(f"{PCHOME_API}/{pid}&fields=Id,Name&_callback=jsonp")
+        info = json.loads(re.search(r"jsonp\((.*)\);\}catch", text, re.S).group(1))
+        name = next(iter(info.values()))["Name"]
+    except Exception as e:
+        log(f"PChome 商品名稱讀取失敗：{e}")
+    return name, {"商品": button.get("ButtonType") == "ForSale"}
+
+
+def stock_from_momo(url):
+    """momo：商品頁的 product:availability 標記為 in stock / out of stock。"""
+    page = fetch_page(url)
+    m = re.search(r'<meta name="product:availability" content="([^"]*)"', page)
+    if not m:
+        log("momo 商品頁回傳內容：" + describe(page))
+        raise RuntimeError("無法解析 momo 庫存狀態，網頁結構可能已改變")
+    t = re.search(r'<meta property="og:title" content="([^"]*)"', page)
+    name = html.unescape(t.group(1)).split(" - momo")[0] if t else f"momo {url.rsplit('=', 1)[-1]}"
+    return name, {"商品": m.group(1) == "in stock"}
+
+
 def get_stock(url):
+    host = urlparse(url).netloc
+    if host.endswith("pchome.com.tw"):
+        return stock_from_pchome(url)
+    if host.endswith("momoshop.com.tw"):
+        return stock_from_momo(url)
     try:
         return stock_from_api(url)
     except Exception as e:
@@ -171,7 +211,8 @@ def check_once(token, to):
         # 只在「缺貨 → 有貨」時通知，避免重複洗版
         newly = [k for k, v in stock.items() if v and not old.get(k, False)]
         if newly:
-            push_line(token, to, f"📷 {name} 到貨啦！\n有貨顏色：{'、'.join(newly)}\n{url}")
+            colors = "" if newly == ["商品"] else f"有貨顏色：{'、'.join(newly)}\n"
+            push_line(token, to, f"📷 {name} 到貨啦！\n{colors}{url}")
             log(f"已通知 LINE：{name} {newly}")
         state[url] = stock
 

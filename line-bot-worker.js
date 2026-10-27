@@ -13,6 +13,7 @@
 // 追蹤的商品清單直接讀 GitHub 上的 stock_state.json，Python 腳本加商品這裡就會自動跟上
 const STATE_URL = "https://raw.githubusercontent.com/i2005no1/fuji-stock-bot/main/stock_state.json";
 const API_BASE = "https://myfuji.com.tw/wp-json/wc/store/v1";
+const PCHOME_API = "https://ecapi-cdn.pchome.com.tw/ecshop/prodapi/v2/prod";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
 const STATUS_CMDS = ["查詢", "庫存", "狀態", "status"];
@@ -81,8 +82,8 @@ async function buildStatus() {
         const { name, stock, qty } = await liveStock(url);
         return formatProduct(name, stock, url, qty);
       } catch {
-        // 官網擋 Cloudflare 或暫時連不上時，改用 GitHub 排程最近一次的檢查結果
-        return formatProduct(slugOf(url), state[url], url) + "\n（官網暫時連不上，顯示 5 分鐘內的檢查結果）";
+        // 網站擋 Cloudflare 或暫時連不上時，改用 GitHub 排程最近一次的檢查結果
+        return formatProduct(labelOf(url), state[url], url) + "\n（網站暫時連不上，顯示 5 分鐘內的檢查結果）";
       }
     })
   );
@@ -91,6 +92,10 @@ async function buildStatus() {
 }
 
 async function liveStock(url) {
+  const host = new URL(url).hostname;
+  if (host.endsWith("pchome.com.tw")) return pchomeStock(url);
+  if (host.endsWith("momoshop.com.tw")) return momoStock(url);
+
   const [product] = await getJson(`${API_BASE}/products?slug=${slugOf(url)}`);
   if (!product) throw new Error("找不到商品");
   const name = decodeEntities(product.name);
@@ -110,6 +115,33 @@ async function liveStock(url) {
     stock: Object.fromEntries(entries.map(([k, inStock]) => [k, inStock])),
     qty: Object.fromEntries(entries.map(([k, , n]) => [k, n])),
   };
+}
+
+// PChome 24h：ButtonType 為 ForSale 才是可下單，OrderRefill 是補貨中
+async function pchomeStock(url) {
+  const id = slugOf(url);
+  const [button] = await getJson(`${PCHOME_API}/button&id=${id}&fields=Id,Qty,ButtonType`);
+  const inStock = button.ButtonType === "ForSale";
+  let name = labelOf(url);
+  try {
+    // 商品名稱 API 只有 JSONP 格式穩定有回應
+    const res = await fetch(`${PCHOME_API}/${id}&fields=Id,Name&_callback=jsonp`, { headers: { "User-Agent": UA } });
+    const info = JSON.parse((await res.text()).match(/jsonp\((.*)\);\}catch/s)[1]);
+    name = Object.values(info)[0].Name;
+  } catch {}
+  return { name, stock: { 商品: inStock }, qty: { 商品: inStock && button.Qty > 0 ? button.Qty : null } };
+}
+
+// momo：商品頁的 product:availability 標記為 in stock / out of stock
+async function momoStock(url) {
+  const res = await fetch(url, { headers: { "User-Agent": UA, "Accept-Language": "zh-TW" } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const page = await res.text();
+  const avail = page.match(/<meta name="product:availability" content="([^"]*)"/);
+  if (!avail) throw new Error("無法解析 momo 庫存");
+  const title = page.match(/<meta property="og:title" content="([^"]*)"/);
+  const name = title ? decodeEntities(title[1]).split(" - momo")[0] : labelOf(url);
+  return { name, stock: { 商品: avail[1] === "in stock" }, qty: {} };
 }
 
 // 官網沒直接公開庫存數，但有管理庫存時「加入購物車上限」會等於剩餘數量（未設定時是 9999）
@@ -137,6 +169,14 @@ async function getJson(url) {
 
 function slugOf(url) {
   return url.replace(/\/+$/, "").split("/").pop();
+}
+
+// 連不上網站時顯示的商品代稱
+function labelOf(url) {
+  const { hostname, searchParams } = new URL(url);
+  if (hostname.endsWith("pchome.com.tw")) return `PChome ${slugOf(url)}`;
+  if (hostname.endsWith("momoshop.com.tw")) return `momo ${searchParams.get("i_code")}`;
+  return slugOf(url);
 }
 
 function decodeEntities(s) {
