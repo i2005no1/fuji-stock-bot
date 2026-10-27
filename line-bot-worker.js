@@ -2,6 +2,7 @@
  * 富士到貨機器人 — LINE 指令回覆（Cloudflare Worker）
  *
  * 在 LINE 輸入「查詢」「庫存」「狀態」→ 回覆目前所有追蹤商品的庫存
+ * 輸入「我的ID」→ 回覆自己的 userId（在群組裡另外附上 groupId），可填進 LINE_TO
  * 輸入「說明」→ 回覆指令列表
  *
  * 需要在 Cloudflare 設定兩個 Secret：
@@ -16,7 +17,8 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 const STATUS_CMDS = ["查詢", "庫存", "狀態", "status"];
 const HELP_CMDS = ["說明", "指令", "help"];
-const HELP_TEXT = "📷 富士到貨機器人\n\n指令：\n・查詢／庫存／狀態：查看目前庫存\n・說明：顯示這段說明\n\n有貨時會自動通知你 🔔";
+const ID_CMDS = ["我的id", "id", "myid"];
+const HELP_TEXT = "📷 富士到貨機器人\n\n指令：\n・查詢／庫存／狀態：查看目前庫存\n・我的ID：查看你的 LINE User ID\n・說明：顯示這段說明\n\n有貨時會自動通知你 🔔";
 
 export default {
   async fetch(request, env, ctx) {
@@ -45,6 +47,8 @@ async function handleEvent(event, env) {
     } catch (e) {
       reply = `⚠️ 查詢失敗：${e.message}\n請稍後再試`;
     }
+  } else if (ID_CMDS.includes(text.replace(/\s+/g, ""))) {
+    reply = formatIds(event.source);
   } else if (HELP_CMDS.includes(text) || event.source.type === "user") {
     // 一對一聊天輸入其他文字就回說明；群組裡則不理會，避免干擾聊天
     reply = HELP_TEXT;
@@ -60,6 +64,13 @@ async function handleEvent(event, env) {
     },
     body: JSON.stringify({ replyToken: event.replyToken, messages: [{ type: "text", text: reply }] }),
   });
+}
+
+function formatIds(source) {
+  const lines = [`🆔 你的 User ID：\n${source.userId || "（LINE 沒有提供，請改在一對一聊天輸入）"}`];
+  if (source.groupId) lines.push(`👥 這個群組的 Group ID：\n${source.groupId}`);
+  if (source.roomId) lines.push(`👥 這個聊天室的 Room ID：\n${source.roomId}`);
+  return lines.join("\n\n");
 }
 
 async function buildStatus() {
