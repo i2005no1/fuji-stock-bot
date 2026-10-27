@@ -1,5 +1,5 @@
 """
-富士相機到貨追蹤機器人
+PG小助手：相機到貨追蹤
 監控 myfuji.com.tw、PChome、momo 商品，任一商品／顏色有貨時推播到 LINE 聊天室（LINE Messaging API）。
 
 用法：
@@ -230,7 +230,7 @@ def main():
 
     token, to = load_config()
     if args.test:
-        push_line(token, to, "✅ 富士到貨機器人測試訊息")
+        push_line(token, to, "✅ PG小助手測試訊息")
         log("測試訊息已送出")
         return
     if args.once:

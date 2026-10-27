@@ -1,5 +1,5 @@
 /**
- * 富士到貨機器人 — LINE 指令回覆（Cloudflare Worker）
+ * PG小助手 — LINE 指令回覆（Cloudflare Worker）
  *
  * 在 LINE 輸入「查詢」「庫存」「狀態」→ 回覆目前所有追蹤商品的庫存
  * 輸入「我的ID」→ 回覆自己的 userId（在群組裡另外附上 groupId），可填進 LINE_TO
@@ -19,7 +19,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const STATUS_CMDS = ["查詢", "庫存", "狀態", "status"];
 const HELP_CMDS = ["說明", "指令", "help"];
 const ID_CMDS = ["我的id", "id", "myid"];
-const HELP_TEXT = "📷 富士到貨機器人\n\n指令：\n・查詢／庫存／狀態：查看目前庫存\n・我的ID：查看你的 LINE User ID\n・說明：顯示這段說明\n\n有貨時會自動通知你 🔔";
+const HELP_TEXT = "📷 PG小助手\n\n指令：\n・查詢／庫存／狀態：查看目前庫存\n・我的ID：查看你的 LINE User ID\n・說明：顯示這段說明\n\n有貨時會自動通知你 🔔";
 
 export default {
   async fetch(request, env, ctx) {
