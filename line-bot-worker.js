@@ -74,21 +74,55 @@ function formatIds(source) {
   return lines.join("\n\n");
 }
 
+// 查詢結果依來源分組，順序照這裡排
+const SOURCES = [
+  { host: "myfuji.com.tw", label: "🏪 富士官網" },
+  { host: "pchome.com.tw", label: "🛒 PChome 24h" },
+  { host: "momoshop.com.tw", label: "🛍️ momo" },
+];
+
 async function buildStatus() {
   const state = await getJson(STATE_URL);
-  const sections = await Promise.all(
+  const products = await Promise.all(
     Object.keys(state).map(async (url) => {
       try {
-        const { name, stock, qty } = await liveStock(url);
-        return formatProduct(name, stock, url, qty);
+        return { url, ...(await liveStock(url)) };
       } catch {
         // 網站擋 Cloudflare 或暫時連不上時，改用 GitHub 排程最近一次的檢查結果
-        return formatProduct(labelOf(url), state[url], url) + "\n（網站暫時連不上，顯示 5 分鐘內的檢查結果）";
+        return { url, name: labelOf(url), stock: state[url], qty: {}, stale: true };
       }
     })
   );
+
+  const groups = new Map();
+  for (const p of products) {
+    const label = sourceOf(p.url);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(formatProduct(p));
+  }
+  const order = SOURCES.map((s) => s.label);
+  const sections = [...groups]
+    .sort(([a], [b]) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99))
+    .map(([label, items]) => `${label}\n${items.join("\n")}`);
+
   const now = new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false });
-  return `📷 富士商品庫存\n🕒 ${now}\n\n${sections.join("\n\n")}`;
+  const note = products.some((p) => p.stale) ? "\n\n⚠️ 標記的商品網站暫時連不上，顯示上次排程的檢查結果" : "";
+  return `📷 商品庫存\n🕒 ${now}\n\n${sections.join("\n\n")}${note}`;
+}
+
+function sourceOf(url) {
+  const host = new URL(url).hostname;
+  return SOURCES.find((s) => host.endsWith(s.host))?.label || "🔗 其他";
+}
+
+// 去掉品牌、公司貨等重複字樣，讓一行放得下
+function shortName(name) {
+  return name
+    .replace(/【[^】]*】/g, "")
+    .replace(/\s*[(（](GR3X|公司貨)[)）]/gi, "")
+    .replace(/^(FUJIFILM|RICOH)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 async function liveStock(url) {
@@ -152,13 +186,18 @@ function stockQty(p) {
   return max > 0 && max < 9999 ? max : null;
 }
 
-function formatProduct(name, stock, url, qty = {}) {
-  const lines = Object.entries(stock).map(([k, v]) => {
-    const count = v && qty[k] ? `（剩 ${qty[k]} 台）` : "";
-    return `${v ? "✅" : "❌"} ${k}：${v ? "有貨" : "缺貨"}${count}`;
-  });
-  const anyInStock = Object.values(stock).some(Boolean);
-  return `【${name}】\n${lines.join("\n")}${anyInStock ? `\n👉 ${url}` : ""}`;
+// 單一規格商品一行顯示；多顏色商品先列名稱，顏色排在下一行
+function formatProduct({ name, stock, url, qty = {}, stale }) {
+  const count = (k, v) => (v && qty[k] ? `（剩 ${qty[k]} 台）` : "");
+  const entries = Object.entries(stock);
+  const warn = stale ? " ⚠️" : "";
+  const link = entries.some(([, v]) => v) ? `\n　👉 ${url}` : "";
+  if (entries.length === 1 && entries[0][0] === "商品") {
+    const [k, v] = entries[0];
+    return `${v ? "✅" : "❌"} ${shortName(name)}${count(k, v)}${warn}${link}`;
+  }
+  const colors = entries.map(([k, v]) => `${k}${v ? "✅" : "❌"}${count(k, v)}`).join("　");
+  return `・${shortName(name)}${warn}\n　${colors}${link}`;
 }
 
 async function getJson(url) {
