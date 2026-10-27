@@ -38,9 +38,29 @@ export default {
 };
 
 async function handleEvent(event, env) {
-  if (event.type !== "message" || event.message.type !== "text") return;
-  const text = event.message.text.trim().toLowerCase();
+  let reply;
+  if (event.type === "follow") {
+    // 加入好友（或解除封鎖）時送上指令說明
+    reply = `👋 謝謝加入好友！\n\n${HELP_TEXT}`;
+  } else if (event.type !== "message" || event.message.type !== "text") {
+    return;
+  } else {
+    reply = await replyToText(event);
+    if (!reply) return;
+  }
 
+  await fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,
+    },
+    body: JSON.stringify({ replyToken: event.replyToken, messages: [{ type: "text", text: reply }] }),
+  });
+}
+
+async function replyToText(event) {
+  const text = event.message.text.trim().toLowerCase();
   let reply;
   if (STATUS_CMDS.includes(text)) {
     try {
@@ -53,18 +73,8 @@ async function handleEvent(event, env) {
   } else if (HELP_CMDS.includes(text) || event.source.type === "user") {
     // 一對一聊天輸入其他文字就回說明；群組裡則不理會，避免干擾聊天
     reply = HELP_TEXT;
-  } else {
-    return;
   }
-
-  await fetch("https://api.line.me/v2/bot/message/reply", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,
-    },
-    body: JSON.stringify({ replyToken: event.replyToken, messages: [{ type: "text", text: reply }] }),
-  });
+  return reply;
 }
 
 function formatIds(source) {
