@@ -78,8 +78,8 @@ async function buildStatus() {
   const sections = await Promise.all(
     Object.keys(state).map(async (url) => {
       try {
-        const { name, stock } = await liveStock(url);
-        return formatProduct(name, stock, url);
+        const { name, stock, qty } = await liveStock(url);
+        return formatProduct(name, stock, url, qty);
       } catch {
         // 官網擋 Cloudflare 或暫時連不上時，改用 GitHub 排程最近一次的檢查結果
         return formatProduct(slugOf(url), state[url], url) + "\n（官網暫時連不上，顯示 5 分鐘內的檢查結果）";
@@ -94,20 +94,37 @@ async function liveStock(url) {
   const [product] = await getJson(`${API_BASE}/products?slug=${slugOf(url)}`);
   if (!product) throw new Error("找不到商品");
   const name = decodeEntities(product.name);
-  if (!product.variations?.length) return { name, stock: { 商品: !!product.is_in_stock } };
+  if (!product.variations?.length) {
+    return { name, stock: { 商品: !!product.is_in_stock }, qty: { 商品: stockQty(product) } };
+  }
 
   const entries = await Promise.all(
     product.variations.map(async (v) => {
       const detail = await getJson(`${API_BASE}/products/${v.id}`);
       const vname = v.attributes.map((a) => a.value).join(" / ") || String(v.id);
-      return [vname, !!detail.is_in_stock && detail.is_purchasable !== false];
+      return [vname, !!detail.is_in_stock && detail.is_purchasable !== false, stockQty(detail)];
     })
   );
-  return { name, stock: Object.fromEntries(entries) };
+  return {
+    name,
+    stock: Object.fromEntries(entries.map(([k, inStock]) => [k, inStock])),
+    qty: Object.fromEntries(entries.map(([k, , n]) => [k, n])),
+  };
 }
 
-function formatProduct(name, stock, url) {
-  const lines = Object.entries(stock).map(([k, v]) => `${v ? "✅" : "❌"} ${k}：${v ? "有貨" : "缺貨"}`);
+// 官網沒直接公開庫存數，但有管理庫存時「加入購物車上限」會等於剩餘數量（未設定時是 9999）
+function stockQty(p) {
+  if (!p.is_in_stock) return null;
+  if (p.low_stock_remaining > 0) return p.low_stock_remaining;
+  const max = p.add_to_cart?.maximum;
+  return max > 0 && max < 9999 ? max : null;
+}
+
+function formatProduct(name, stock, url, qty = {}) {
+  const lines = Object.entries(stock).map(([k, v]) => {
+    const count = v && qty[k] ? `（剩 ${qty[k]} 台）` : "";
+    return `${v ? "✅" : "❌"} ${k}：${v ? "有貨" : "缺貨"}${count}`;
+  });
   const anyInStock = Object.values(stock).some(Boolean);
   return `【${name}】\n${lines.join("\n")}${anyInStock ? `\n👉 ${url}` : ""}`;
 }
