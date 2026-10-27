@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"   # 每 5 分鐘（UTC，GitHub 尖峰時段可能延遲）
   workflow_dispatch:         # 可在 Actions 頁面手動執行
+    inputs:
+      test:
+        description: "只發一則測試訊息到 LINE（不檢查庫存）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write            # 需要把 stock_state.json 存回 repo
@@ -23,13 +28,22 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: 發送測試訊息
+        if: ${{ inputs.test }}
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TO: ${{ secrets.LINE_TO }}
+        run: python fuji_stock_bot.py --test
+
       - name: 檢查庫存
+        if: ${{ !inputs.test }}
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TO: ${{ secrets.LINE_TO }}
         run: python fuji_stock_bot.py --once
 
       - name: 儲存庫存狀態
+        if: ${{ !inputs.test }}
         run: |
           if [ -n "$(git status --porcelain stock_state.json)" ]; then
             git config user.name "github-actions[bot]"
