@@ -115,12 +115,11 @@ function sourceOf(url) {
   return SOURCES.find((s) => host.endsWith(s.host))?.label || "🔗 其他";
 }
 
-// 去掉品牌、公司貨等重複字樣，讓一行放得下
+// 去掉公司貨等重複字樣，讓一行放得下；momo 的【品牌】改成一般前綴
 function shortName(name) {
   return name
-    .replace(/【[^】]*】/g, "")
+    .replace(/【([^】]*)】/g, "$1 ")
     .replace(/\s*[(（](GR3X|公司貨)[)）]/gi, "")
-    .replace(/^(FUJIFILM|RICOH)\s+/i, "")
     .replace(/\s+/g, " ")
     .trim();
 }
