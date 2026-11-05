@@ -11,7 +11,7 @@
  */
 
 // 追蹤的商品清單直接讀 GitHub 上的 stock_state.json，Python 腳本加商品這裡就會自動跟上
-const STATE_URL = "https://raw.githubusercontent.com/i2005no1/wpg_bot/main/stock_state.json";
+const STATE_URL = "https://raw.githubusercontent.com/i2005no1/wpg-line-bot/main/stock_state.json";
 const API_BASE = "https://myfuji.com.tw/wp-json/wc/store/v1";
 const PCHOME_API = "https://ecapi-cdn.pchome.com.tw/ecshop/prodapi/v2/prod";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
@@ -96,7 +96,7 @@ async function buildStatus() {
   const products = await Promise.all(
     Object.keys(state).map(async (url) => {
       try {
-        return { url, ...(await liveStock(url)) };
+        return { url, ...(await liveStock(url, state[url])) };
       } catch {
         // 網站擋 Cloudflare 或暫時連不上時，改用 GitHub 排程最近一次的檢查結果
         return { url, name: labelOf(url), stock: state[url], qty: {}, stale: true };
@@ -134,9 +134,9 @@ function shortName(name) {
     .trim();
 }
 
-async function liveStock(url) {
+async function liveStock(url, known) {
   const host = new URL(url).hostname;
-  if (host.endsWith("pchome.com.tw")) return pchomeStock(url);
+  if (host.endsWith("pchome.com.tw")) return pchomeStock(url, known);
   if (host.endsWith("momoshop.com.tw")) return momoStock(url);
 
   const [product] = await getJson(`${API_BASE}/products?slug=${slugOf(url)}`);
@@ -161,8 +161,10 @@ async function liveStock(url) {
 }
 
 // PChome 24h：ButtonType 為 ForSale 才是可下單，OrderRefill 是補貨中
-async function pchomeStock(url) {
+// 顏色名稱 API 不提供，沿用 Python 腳本寫進 stock_state.json 的規格名稱
+async function pchomeStock(url, known) {
   const id = slugOf(url);
+  const spec = Object.keys(known || {})[0] || "商品";
   const [button] = await getJson(`${PCHOME_API}/button&id=${id}&fields=Id,Qty,ButtonType`);
   const inStock = button.ButtonType === "ForSale";
   let name = labelOf(url);
@@ -172,7 +174,7 @@ async function pchomeStock(url) {
     const info = JSON.parse((await res.text()).match(/jsonp\((.*)\);\}catch/s)[1]);
     name = Object.values(info)[0].Name;
   } catch {}
-  return { name, stock: { 商品: inStock }, qty: { 商品: inStock && button.Qty > 0 ? button.Qty : null } };
+  return { name, stock: { [spec]: inStock }, qty: { [spec]: inStock && button.Qty > 0 ? button.Qty : null } };
 }
 
 // momo：商品頁的 product:availability 標記為 in stock / out of stock
@@ -198,7 +200,7 @@ function stockQty(p) {
 // 商品名稱一行，下面每個顏色（單一規格商品則只有一行）標示有貨／缺貨
 function formatProduct({ name, stock, url, qty = {}, stale }) {
   const lines = Object.entries(stock).map(([k, v]) => {
-    const status = `${v ? "✅ 有貨" : "❌ 缺貨"}${v && qty[k] ? `（剩 ${qty[k]} 台）` : ""}`;
+    const status = `${v ? "✅ 有貨" : "❌ 缺貨"}${v && qty[k] ? `（剩 ${qty[k]} 件）` : ""}`;
     return `　${k === "商品" ? status : `${k}：${status}`}`;
   });
   const link = Object.values(stock).some(Boolean) ? `\n　👉 ${url}` : "";

@@ -24,16 +24,16 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 # 要追蹤的商品頁網址，想加新商品就在這裡多加一行（支援 myfuji、PChome 24h、momo）
+# PChome 多規格商品要在網址後面加規格編號（例如 -001），否則只會查到第一個規格
 PRODUCT_URLS = [
-    "https://myfuji.com.tw/product/fujifilm-x-m5xc15-45mm-kit/",
-    "https://myfuji.com.tw/product/fujifilm-x-t30iiixc13-33mm-kit/",
-    # RICOH GR IIIx 公司貨
-    "https://24h.pchome.com.tw/prod/DGADJN-1900JXSR9",   # 標準版
-    "https://24h.pchome.com.tw/prod/DGADJN-1900K6GUY",   # 標準版 + GF-2 閃光燈組
-    "https://24h.pchome.com.tw/prod/DGADLR-1900KHK6N",   # HDF 全配組
-    "https://www.momoshop.com.tw/goods/GoodsDetail.jsp?i_code=13432322",  # +Q20III 閃光燈組
-    "https://www.momoshop.com.tw/goods/GoodsDetail.jsp?i_code=12985987",  # HDF +Q20III 閃光燈組
+    "https://24h.pchome.com.tw/prod/DGBX8N-A900JMMOW-001",  # PEAK DESIGN Cuff Rope 經典黑
+    "https://24h.pchome.com.tw/prod/DGBH90-A900KMYJ5-001",  # PEAK DESIGN Cuff Rope 經典黑
 ]
+# PChome 規格編號對應的顏色名稱（API 不提供），會顯示在通知和查詢結果裡
+PCHOME_SPECS = {
+    "DGBX8N-A900JMMOW-001": "經典黑",
+    "DGBH90-A900KMYJ5-001": "經典黑",
+}
 API_BASE = "https://myfuji.com.tw/wp-json/wc/store/v1"
 PCHOME_API = "https://ecapi-cdn.pchome.com.tw/ecshop/prodapi/v2/prod"
 CHECK_INTERVAL_SEC = 300
@@ -131,7 +131,7 @@ def stock_from_pchome(url):
         name = next(iter(info.values()))["Name"]
     except Exception as e:
         log(f"PChome 商品名稱讀取失敗：{e}")
-    return name, {"商品": button.get("ButtonType") == "ForSale"}
+    return name, {PCHOME_SPECS.get(pid, "商品"): button.get("ButtonType") == "ForSale"}
 
 
 def stock_from_momo(url):
