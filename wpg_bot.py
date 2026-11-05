@@ -24,16 +24,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 # 要追蹤的商品頁網址，想加新商品就在這裡多加一行（支援 myfuji、PChome 24h、momo）
-# PChome 多規格商品要在網址後面加規格編號（例如 -001），否則只會查到第一個規格
 PRODUCT_URLS = [
-    "https://24h.pchome.com.tw/prod/DGBX8N-A900JMMOW-001",  # PEAK DESIGN Cuff Rope 經典黑
-    "https://24h.pchome.com.tw/prod/DGBH90-A900KMYJ5-001",  # PEAK DESIGN Cuff Rope 經典黑
+    "https://24h.pchome.com.tw/prod/DGBX8N-A900JMMOW",  # PEAK DESIGN Cuff Rope
+    "https://24h.pchome.com.tw/prod/DGBH90-A900KMYJ5",  # PEAK DESIGN Cuff Rope
 ]
-# PChome 規格編號對應的顏色名稱（API 不提供），會顯示在通知和查詢結果裡
-PCHOME_SPECS = {
-    "DGBX8N-A900JMMOW-001": "經典黑",
-    "DGBH90-A900KMYJ5-001": "經典黑",
-}
 API_BASE = "https://myfuji.com.tw/wp-json/wc/store/v1"
 PCHOME_API = "https://ecapi-cdn.pchome.com.tw/ecshop/prodapi/v2/prod"
 CHECK_INTERVAL_SEC = 300
@@ -119,10 +113,21 @@ def describe(text):
     return f"長度={len(text)} 標題={title.group(1).strip() if title else '無'} 內容={snippet}"
 
 
+def pchome_specs(pid):
+    """從商品頁取得 {規格編號: 顏色}（API 不提供顏色名稱）；單一規格商品回傳空 dict。"""
+    page = fetch_page(f"https://24h.pchome.com.tw/prod/{pid}").replace('\\"', '"')
+    pattern = '"Id":"(' + re.escape(pid) + '-[0-9]+)","Name":"[^"]*","Spec":"([^"]*)"'
+    return {k: v for k, v in re.findall(pattern, page) if v}
+
+
 def stock_from_pchome(url):
     """PChome 24h：ButtonType 為 ForSale 才是可下單，OrderRefill 是補貨中。"""
     pid = slug_of(url)
-    button = json.loads(fetch_page(f"{PCHOME_API}/button&id={pid}&fields=Id,Qty,ButtonType"))[0]
+    buttons = json.loads(fetch_page(f"{PCHOME_API}/button&id={pid}&fields=Id,Qty,ButtonType"))
+    specs = pchome_specs(pid)
+    if len(buttons) > 1 and not specs:
+        # 顏色名稱是狀態的 key，讀不到時要失敗，否則下次會被當成新顏色誤發通知
+        raise RuntimeError(f"讀不到 {pid} 的顏色名稱")
     name = f"PChome {pid}"
     try:
         # 商品名稱 API 只有 JSONP 格式穩定有回應
@@ -131,7 +136,24 @@ def stock_from_pchome(url):
         name = next(iter(info.values()))["Name"]
     except Exception as e:
         log(f"PChome 商品名稱讀取失敗：{e}")
-    return name, {PCHOME_SPECS.get(pid, "商品"): button.get("ButtonType") == "ForSale"}
+    if not specs:
+        return name, {"商品": buttons[0].get("ButtonType") == "ForSale"}
+    # -000 是多規格商品的總項，不是實際顏色
+    return name, {specs[b["Id"]]: b.get("ButtonType") == "ForSale" for b in buttons if b["Id"] in specs}
+
+
+def pchome_prices(url):
+    """回傳 {顏色: 價錢}。只用在通知內容，讀取失敗時不影響到貨通知。"""
+    pid = slug_of(url)
+    prices = {}
+    try:
+        for spec_id, color in (pchome_specs(pid) or {pid: "商品"}).items():
+            text = fetch_page(f"{PCHOME_API}/{spec_id}&fields=Id,Price&_callback=jsonp")
+            info = json.loads(re.search(r"jsonp\((.*)\);\}catch", text, re.S).group(1))
+            prices[color] = next(iter(info.values()))["Price"]["P"]
+    except Exception as e:
+        log(f"PChome 價錢讀取失敗：{e}")
+    return prices
 
 
 def stock_from_momo(url):
@@ -193,6 +215,25 @@ def load_state():
         return {}
 
 
+def format_alert(name, stock, newly, url):
+    """到貨通知：列出剛到貨的顏色，以及目前所有可購買的顏色和價錢。"""
+    prices = pchome_prices(url) if urlparse(url).netloc.endswith("pchome.com.tw") else {}
+
+    def priced(color):
+        return f"NT${prices[color]:,}" if color in prices else ""
+
+    lines = [f"📷 {name} 到貨啦！"]
+    if newly == ["商品"]:
+        if priced("商品"):
+            lines.append(f"價錢：{priced('商品')}")
+    else:
+        lines.append(f"剛到貨：{'、'.join(newly)}")
+        lines.append("目前可購買：")
+        lines += [f"・{k} {priced(k)}".rstrip() for k, v in stock.items() if v]
+    lines.append(url)
+    return "\n".join(lines)
+
+
 def check_once(token, to):
     prev = load_state()
     state = {}
@@ -211,8 +252,7 @@ def check_once(token, to):
         # 只在「缺貨 → 有貨」時通知，避免重複洗版
         newly = [k for k, v in stock.items() if v and not old.get(k, False)]
         if newly:
-            colors = "" if newly == ["商品"] else f"有貨顏色：{'、'.join(newly)}\n"
-            push_line(token, to, f"📷 {name} 到貨啦！\n{colors}{url}")
+            push_line(token, to, format_alert(name, stock, newly, url))
             log(f"已通知 LINE：{name} {newly}")
         state[url] = stock
 

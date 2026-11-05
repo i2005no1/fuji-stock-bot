@@ -96,7 +96,7 @@ async function buildStatus() {
   const products = await Promise.all(
     Object.keys(state).map(async (url) => {
       try {
-        return { url, ...(await liveStock(url, state[url])) };
+        return { url, ...(await liveStock(url)) };
       } catch {
         // 網站擋 Cloudflare 或暫時連不上時，改用 GitHub 排程最近一次的檢查結果
         return { url, name: labelOf(url), stock: state[url], qty: {}, stale: true };
@@ -134,9 +134,9 @@ function shortName(name) {
     .trim();
 }
 
-async function liveStock(url, known) {
+async function liveStock(url) {
   const host = new URL(url).hostname;
-  if (host.endsWith("pchome.com.tw")) return pchomeStock(url, known);
+  if (host.endsWith("pchome.com.tw")) return pchomeStock(url);
   if (host.endsWith("momoshop.com.tw")) return momoStock(url);
 
   const [product] = await getJson(`${API_BASE}/products?slug=${slugOf(url)}`);
@@ -161,12 +161,11 @@ async function liveStock(url, known) {
 }
 
 // PChome 24h：ButtonType 為 ForSale 才是可下單，OrderRefill 是補貨中
-// 顏色名稱 API 不提供，沿用 Python 腳本寫進 stock_state.json 的規格名稱
-async function pchomeStock(url, known) {
+async function pchomeStock(url) {
   const id = slugOf(url);
-  const spec = Object.keys(known || {})[0] || "商品";
-  const [button] = await getJson(`${PCHOME_API}/button&id=${id}&fields=Id,Qty,ButtonType`);
-  const inStock = button.ButtonType === "ForSale";
+  const buttons = await getJson(`${PCHOME_API}/button&id=${id}&fields=Id,Qty,ButtonType`);
+  const specs = await pchomeSpecs(id);
+  if (buttons.length > 1 && !Object.keys(specs).length) throw new Error("讀不到顏色名稱");
   let name = labelOf(url);
   try {
     // 商品名稱 API 只有 JSONP 格式穩定有回應
@@ -174,7 +173,25 @@ async function pchomeStock(url, known) {
     const info = JSON.parse((await res.text()).match(/jsonp\((.*)\);\}catch/s)[1]);
     name = Object.values(info)[0].Name;
   } catch {}
-  return { name, stock: { [spec]: inStock }, qty: { [spec]: inStock && button.Qty > 0 ? button.Qty : null } };
+  // -000 是多規格商品的總項，不是實際顏色；單一規格商品才用它
+  const items = Object.keys(specs).length ? buttons.filter((b) => specs[b.Id]) : buttons.slice(0, 1);
+  const stock = {};
+  const qty = {};
+  for (const b of items) {
+    const key = specs[b.Id] || "商品";
+    stock[key] = b.ButtonType === "ForSale";
+    qty[key] = stock[key] && b.Qty > 0 ? b.Qty : null;
+  }
+  return { name, stock, qty };
+}
+
+// 從商品頁取得 {規格編號: 顏色}（API 不提供顏色名稱）；單一規格商品回傳空物件
+async function pchomeSpecs(id) {
+  const res = await fetch(`https://24h.pchome.com.tw/prod/${id}`, { headers: { "User-Agent": UA, "Accept-Language": "zh-TW" } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const page = (await res.text()).replaceAll('\\"', '"');
+  const pattern = new RegExp(`"Id":"(${id}-\\d+)","Name":"[^"]*","Spec":"([^"]*)"`, "g");
+  return Object.fromEntries([...page.matchAll(pattern)].filter((m) => m[2]).map((m) => [m[1], m[2]]));
 }
 
 // momo：商品頁的 product:availability 標記為 in stock / out of stock
