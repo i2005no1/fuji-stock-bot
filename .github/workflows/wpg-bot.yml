@@ -1,0 +1,58 @@
+name: WPG Bot 到貨檢查
+
+on:
+  workflow_dispatch:         # 由 cron-job.org 定時呼叫 API 觸發，也可在 Actions 頁面手動執行
+    inputs:
+      test:
+        description: "只發一則測試訊息到 LINE（不檢查庫存）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write            # 需要把 stock_state.json 存回 repo
+
+concurrency:
+  group: wpg-bot
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 發送測試訊息
+        if: ${{ inputs.test }}
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TO: ${{ secrets.LINE_TO }}
+        run: python wpg_bot.py --test
+
+      - name: 檢查庫存
+        if: ${{ !inputs.test }}
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TO: ${{ secrets.LINE_TO }}
+        run: python wpg_bot.py --once
+
+      - name: 儲存庫存狀態
+        # 某個網站暫時失敗時也要存，否則其他商品下次會重複通知
+        if: ${{ !cancelled() && !inputs.test }}
+        run: |
+          if [ -n "$(git status --porcelain stock_state.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add stock_state.json
+            git commit -m "更新庫存狀態"
+            # 執行期間 repo 若有新 commit，先接上最新版本再推
+            for i in 1 2 3; do
+              git pull --rebase origin main && git push && exit 0
+              sleep 5
+            done
+            exit 1
+          fi

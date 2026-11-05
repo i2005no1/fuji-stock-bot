@@ -1,4 +1,4 @@
-name: 富士到貨檢查
+name: 舊排程（待刪除）
 
 on:
   workflow_dispatch:         # 由 cron-job.org 定時呼叫 API 觸發，也可在 Actions 頁面手動執行
@@ -12,7 +12,7 @@ permissions:
   contents: write            # 需要把 stock_state.json 存回 repo
 
 concurrency:
-  group: fuji-stock
+  group: wpg-bot
   cancel-in-progress: false
 
 jobs:
@@ -31,14 +31,14 @@ jobs:
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TO: ${{ secrets.LINE_TO }}
-        run: python fuji_stock_bot.py --test
+        run: python wpg_bot.py --test
 
       - name: 檢查庫存
         if: ${{ !inputs.test }}
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TO: ${{ secrets.LINE_TO }}
-        run: python fuji_stock_bot.py --once
+        run: python wpg_bot.py --once
 
       - name: 儲存庫存狀態
         # 某個網站暫時失敗時也要存，否則其他商品下次會重複通知
