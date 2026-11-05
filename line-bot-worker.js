@@ -174,7 +174,7 @@ async function pchomeStock(url) {
     name = Object.values(info)[0].Name;
   } catch {}
   // -000 是多規格商品的總項，不是實際顏色；單一規格商品才用它
-  const items = Object.keys(specs).length ? buttons.filter((b) => specs[b.Id]) : buttons.slice(0, 1);
+  const items = Object.keys(specs).length ? buttons.filter((b) => specs[b.Id]).sort((a, b) => a.Id.localeCompare(b.Id)) : buttons.slice(0, 1);
   const stock = {};
   const qty = {};
   for (const b of items) {

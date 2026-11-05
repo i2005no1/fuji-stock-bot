@@ -139,7 +139,7 @@ def stock_from_pchome(url):
     if not specs:
         return name, {"商品": buttons[0].get("ButtonType") == "ForSale"}
     # -000 是多規格商品的總項，不是實際顏色
-    return name, {specs[b["Id"]]: b.get("ButtonType") == "ForSale" for b in buttons if b["Id"] in specs}
+    return name, {specs[b["Id"]]: b.get("ButtonType") == "ForSale" for b in sorted(buttons, key=lambda b: b["Id"]) if b["Id"] in specs}
 
 
 def pchome_prices(url):
