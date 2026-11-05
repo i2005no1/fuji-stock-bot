@@ -11,7 +11,7 @@
  */
 
 // 追蹤的商品清單直接讀 GitHub 上的 stock_state.json，Python 腳本加商品這裡就會自動跟上
-const STATE_URL = "https://raw.githubusercontent.com/i2005no1/fuji-stock-bot/main/stock_state.json";
+const STATE_URL = "https://raw.githubusercontent.com/i2005no1/wpg_bot/main/stock_state.json";
 const API_BASE = "https://myfuji.com.tw/wp-json/wc/store/v1";
 const PCHOME_API = "https://ecapi-cdn.pchome.com.tw/ecshop/prodapi/v2/prod";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
@@ -23,7 +23,7 @@ const HELP_TEXT = "📷 PG小助手\n\n指令：\n・查詢／庫存／狀態：
 
 export default {
   async fetch(request, env, ctx) {
-    if (request.method !== "POST") return new Response("Fuji stock bot is running");
+    if (request.method !== "POST") return new Response("WPG bot is running");
 
     const body = await request.text();
     if (!(await verifySignature(body, request.headers.get("x-line-signature"), env.LINE_CHANNEL_SECRET))) {
